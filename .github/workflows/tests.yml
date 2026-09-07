@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - dev
       - master
     paths:
@@ -13,6 +14,7 @@ on:
       - 'pytest.ini'
   pull_request:
     branches:
+      - main
       - dev
       - master
     paths:
