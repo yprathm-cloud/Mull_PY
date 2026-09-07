@@ -220,8 +220,55 @@ pytest.mark.timeout(30)
 5. Run locally: `pytest frigate/test/test_yourtest.py`
 6. Check coverage: `pytest --cov=frigate`
 
+## Mutation Testing
+
+Mutation testing helps identify weaknesses in your test suite by introducing intentional bugs (mutations) and checking if tests catch them.
+
+### Running Mutation Tests
+
+```bash
+# Test specific module
+mutmut run --paths frigate/util/builtin.py
+
+# Show results
+mutmut results
+
+# HTML report
+mutmut html
+```
+
+### Understanding Mutation Scores
+
+- **Killed mutations** = Tests caught the bug ✅
+- **Survived mutations** = Tests missed the bug ❌
+- **Skipped mutations** = Not testable
+- **Score** = (Killed / Total) × 100%
+
+**Goal: Aim for 80%+ mutation score**
+
+### Example
+
+```python
+# Original code
+def add(a, b):
+    return a + b
+
+# Mutation 1 (killed): return a - b
+# Mutation 2 (killed): return a * b
+```
+
+If your tests catch both mutations, they're good quality!
+
+### CI/CD Integration
+
+Mutation tests run automatically on:
+- Push to `main` branch
+- Manual trigger via workflow dispatch
+- Results available in GitHub Actions artifacts
+
 ## Resources
 
 - [pytest documentation](https://docs.pytest.org/)
 - [unittest.mock documentation](https://docs.python.org/3/library/unittest.mock.html)
 - [Coverage.py documentation](https://coverage.readthedocs.io/)
+- [mutmut documentation](https://mutmut.readthedocs.io/)
