@@ -70,7 +70,6 @@ jobs:
           USER_BIN=$(python -m site --user-base)/bin
           mkdir -p "$USER_BIN"
           echo "$USER_BIN" >> $GITHUB_PATH
-          ln -sf /usr/bin/python3 "$USER_BIN/python"
 
           echo "=== Installed packages ==="
           pip list | grep -E "mutmut|pytest|pathvalidate"
