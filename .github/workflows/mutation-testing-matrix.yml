@@ -113,7 +113,6 @@ jobs:
       - name: Run mutation testing
         continue-on-error: true
         run: |
-          set -e
           echo "=== Mutation Testing Configuration ==="
           echo ""
           cat .mutmut.ini
@@ -121,16 +120,22 @@ jobs:
 
           mkdir -p mutation-results
 
+          # Verify pytest is available
+          echo "=== Verifying pytest is available ==="
+          which pytest
+          python -c "import pytest; print(f'pytest version: {pytest.__version__}')"
+          echo ""
+
           echo "=== Running mutmut on frigate/util/path.py ==="
-          python3 -m mutmut run \
+          python -m mutmut run \
             --paths-to-mutate frigate/util/path.py \
-            2>&1 | tee mutation-results/path-mutations.log || true
+            2>&1 | tee mutation-results/path-mutations.log
 
           echo ""
           echo "=== Running mutmut on frigate/util/builtin.py ==="
-          python3 -m mutmut run \
+          python -m mutmut run \
             --paths-to-mutate frigate/util/builtin.py \
-            2>&1 | tee mutation-results/builtin-mutations.log || true
+            2>&1 | tee mutation-results/builtin-mutations.log
 
       # Step 7: Extract and report results
       - name: Extract mutation results
