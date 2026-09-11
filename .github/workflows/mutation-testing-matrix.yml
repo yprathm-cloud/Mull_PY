@@ -147,22 +147,48 @@ jobs:
 
           mkdir -p mutation-results
 
-          # Run mutmut
+          # Pre-check: verify pytest can find tests
+          echo "DEBUG: Checking if pytest can find tests in ${{ matrix.test_file }}"
+          pytest "${{ matrix.test_file }}" --collect-only -q 2>&1 | tee mutation-results/test-collection.log
+          TEST_COUNT=$(grep -c "test_" mutation-results/test-collection.log || echo "0")
+          echo "DEBUG: Found $TEST_COUNT tests"
+          echo ""
+
+          # Run mutmut with verbose output
           echo "DEBUG: Running mutmut on paths: ${{ matrix.module_path }}"
           echo "DEBUG: Tests directory: frigate/test"
+          echo "DEBUG: Cache directory: .mutmut-cache"
+          echo "DEBUG: Working directory: $(pwd)"
+          echo "DEBUG: Python version: $(python3 --version)"
+          echo ""
+
           python3 -m mutmut run \
             --paths "${{ matrix.module_path }}" \
             --tests-dir frigate/test \
             --test-time-base 0.1 \
             --cache-dir .mutmut-cache \
-            --no-progress 2>&1 | tee mutation-results/raw.log || true
+            --no-progress 2>&1 | tee mutation-results/raw.log
 
+          MUTMUT_EXIT=$?
           echo ""
-          echo "DEBUG: Last 50 lines of mutmut output:"
-          tail -50 mutation-results/raw.log
+          echo "DEBUG: mutmut exit code: $MUTMUT_EXIT"
           echo ""
-          echo "DEBUG: Cache directory contents:"
-          ls -lah .mutmut-cache/ 2>/dev/null || echo "Cache directory not found"
+
+          # Show ALL mutmut output (not just last 50 lines)
+          echo "DEBUG: Full mutmut output:"
+          cat mutation-results/raw.log
+          echo ""
+
+          # Check cache directory
+          echo "DEBUG: Cache directory contents after mutmut:"
+          if [ -d .mutmut-cache ]; then
+            ls -lah .mutmut-cache/
+            echo ""
+            echo "DEBUG: Database file details:"
+            file .mutmut-cache/*.db 2>/dev/null || echo "No .db files found"
+          else
+            echo "Cache directory does not exist!"
+          fi
           echo ""
           echo "=== Extracting mutation statistics ==="
 
