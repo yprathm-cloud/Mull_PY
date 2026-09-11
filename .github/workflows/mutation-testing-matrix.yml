@@ -377,8 +377,8 @@ jobs:
 
           echo "✅ HTML report generated"
 
-      - name: Create summary comment for PR
-        if: github.event_name == 'pull_request'
+      - name: Create summary report
+        if: always()
         run: |
           cat >> $GITHUB_STEP_SUMMARY << EOF
           ## 🧬 Mutation Testing Report - ${{ matrix.module_name }}
