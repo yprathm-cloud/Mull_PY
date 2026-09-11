@@ -199,7 +199,11 @@ jobs:
 
       - name: Aggregate results and create summary
         run: |
+          set +e  # Don't exit on errors
+
           echo "=== Aggregating Mutation Testing Results ==="
+          echo "Looking for results in: all-results/"
+          ls -la all-results/ || echo "No all-results directory"
 
           # Create master summary
           cat > master_summary.md << 'EOF'
@@ -207,38 +211,54 @@ jobs:
 
           ## Summary Table
 
-          | Module | Test File | Priority | Total | Killed | Survived | Timeouts | Score | Status |
-          |--------|-----------|----------|-------|--------|----------|----------|-------|--------|
+          | Module | Test File | Total | Killed | Survived | Score | Status |
+          |--------|-----------|-------|--------|----------|-------|--------|
           EOF
 
-          # Process each module's results
-          for results_dir in all-results/mutation-results-*/; do
-            if [ -d "$results_dir" ] && [ -f "$results_dir/metrics.json" ]; then
-              # Extract values from JSON
-              module=$(grep -oP '"module_name":\s*"\K[^"]+' "$results_dir/metrics.json")
-              test_file=$(grep -oP '"module_path":\s*"\K[^"]+' "$results_dir/metrics.json")
-              priority=$(grep -oP '"priority":\s*"\K[^"]+' "$results_dir/metrics.json")
-              total=$(grep -oP '"total_mutations":\s*\K[0-9]+' "$results_dir/metrics.json")
-              killed=$(grep -oP '"killed":\s*\K[0-9]+' "$results_dir/metrics.json")
-              survived=$(grep -oP '"survived":\s*\K[0-9]+' "$results_dir/metrics.json")
-              timeouts=$(grep -oP '"timeouts":\s*\K[0-9]+' "$results_dir/metrics.json")
-              score=$(grep -oP '"score":\s*\K[0-9]+' "$results_dir/metrics.json")
+          # Process each module's results - more robust parsing
+          for artifact_dir in all-results/*/; do
+            if [ -d "$artifact_dir" ]; then
+              echo "Processing: $artifact_dir"
+              ls -la "$artifact_dir" || echo "Empty directory"
 
-              # Determine status
-              if [ "$score" -ge 80 ]; then
-                status="✅ Excellent"
-              elif [ "$score" -ge 70 ]; then
-                status="🟢 Good"
-              elif [ "$score" -ge 60 ]; then
-                status="🟡 Fair"
+              metrics_file="$artifact_dir/metrics.json"
+              if [ -f "$metrics_file" ]; then
+                echo "Found metrics.json in $artifact_dir"
+
+                # Use python for JSON parsing (more reliable)
+                python3 << PYSCRIPT
+import json
+try:
+    with open("$metrics_file", "r") as f:
+        data = json.load(f)
+        module = data.get("module_name", "Unknown")
+        test_file = data.get("module_path", "Unknown")
+        total = data.get("total_mutations", 0)
+        killed = data.get("killed", 0)
+        survived = data.get("survived", 0)
+        score = data.get("score", 0)
+
+        # Determine status
+        if score >= 80:
+            status = "✅ Excellent"
+        elif score >= 70:
+            status = "🟢 Good"
+        elif score >= 60:
+            status = "🟡 Fair"
+        else:
+            status = "❌ Poor"
+
+        # Print table row
+        print(f"| {module} | \`{test_file}\` | {total} | {killed} ✅ | {survived} ❌ | {score}% | {status} |")
+except Exception as e:
+    print(f"Error parsing JSON: {e}")
+PYSCRIPT
+
               else
-                status="❌ Poor"
+                echo "No metrics.json found in $artifact_dir"
               fi
-
-              # Add row to table
-              echo "| $module | \`$test_file\` | $priority | $total | $killed ✅ | $survived ❌ | $timeouts | $score% | $status |" >> master_summary.md
             fi
-          done
+          done >> master_summary.md
 
           # Add footer
           cat >> master_summary.md << 'EOF'
@@ -246,15 +266,7 @@ jobs:
           ## Key Metrics
 
           - **Goal:** Achieve 80%+ mutation score across all modules
-          - **Enforcement:** Workflow fails if any critical module scores below 70%
           - **Action:** Review survived mutations and enhance tests accordingly
-
-          ## Next Steps
-
-          1. Review modules with low scores
-          2. Analyze survived mutations
-          3. Add tests for discovered gaps
-          4. Re-run workflow to verify improvements
 
           ---
 
@@ -264,7 +276,7 @@ jobs:
           # Output to GitHub summary
           cat master_summary.md >> $GITHUB_STEP_SUMMARY
 
-          # Also display in console
+          echo "✅ Summary created successfully"
           cat master_summary.md
 
       - name: Check mutation score threshold
