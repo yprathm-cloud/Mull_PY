@@ -1,31 +1,28 @@
-name: Mutation Testing - Matrix Analysis
+name: Mutation Testing - Frigate Utilities
 
 on:
   workflow_dispatch:
-    inputs:
-      modules:
-        description: 'Run all modules or specific'
-        required: false
-        default: 'all'
   push:
     branches:
       - main
     paths:
-      - 'frigate/util/**'
-      - 'frigate/test/**'
+      - 'frigate/util/path.py'
+      - 'frigate/util/builtin.py'
+      - 'frigate/test/test_util_path.py'
+      - 'frigate/test/test_builtin.py'
       - '.mutmut.ini'
       - '.github/workflows/mutation-testing-matrix.yml'
-      - '.github/workflows/*.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'frigate/util/**'
-      - 'frigate/test/**'
-      - '.github/workflows/mutation-testing-matrix.yml'
+      - 'frigate/util/path.py'
+      - 'frigate/util/builtin.py'
+      - 'frigate/test/test_util_path.py'
+      - 'frigate/test/test_builtin.py'
 
 concurrency:
-  group: ${{ github.ref }}-mutation-matrix
+  group: ${{ github.ref }}-mutation-testing
   cancel-in-progress: true
 
 env:
@@ -34,412 +31,155 @@ env:
   PYTEST_VERSION: '8.4.0'
 
 jobs:
-  mutation-matrix:
+  mutation-testing:
     runs-on: ubuntu-22.04
-    name: Mutation Testing - ${{ matrix.module_name }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Utility modules - security critical
-          - module_path: 'frigate/util/path.py'
-            module_name: 'Path Utils (Security)'
-            test_file: 'frigate/test/test_util_path.py'
-            priority: 'critical'
-
-          - module_path: 'frigate/util/builtin.py'
-            module_name: 'Builtin Utils'
-            test_file: 'frigate/test/test_builtin.py'
-            priority: 'high'
+    name: Mutation Testing - Frigate Utilities
 
     steps:
+      # Step 1: Checkout
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
+      # Step 3: Install dependencies (minimal set for util tests only)
       - name: Install dependencies
         run: |
+          set -e
+          echo "=== Installing core tools ==="
           python -m pip install --upgrade pip setuptools wheel
 
-          # Install test framework and mutation testing tools
-          pip install -q pytest==${{ env.PYTEST_VERSION }} pytest-cov pytest-mock coverage mutmut==${{ env.MUTMUT_VERSION }}
+          pip install -q \
+            pytest==${{ env.PYTEST_VERSION }} \
+            pytest-cov \
+            pytest-mock \
+            coverage \
+            mutmut==${{ env.MUTMUT_VERSION }}
 
-          # Install test requirements if available
-          if [ -f requirements-test.txt ]; then
-            pip install -q -r requirements-test.txt
-          fi
+          echo "=== Installing util module dependencies ==="
+          pip install -q pathvalidate ruamel.yaml numpy scipy
 
-          # Install project dependencies required for mutation testing
-          # These are needed to import the modules we're testing
-          # Install each critical dependency individually to catch errors
-          echo "Installing project dependencies..."
-          pip install pathvalidate || (echo "FAILED to install pathvalidate"; exit 1)
-          pip install ruamel.yaml || (echo "FAILED to install ruamel.yaml"; exit 1)
-          pip install numpy || (echo "FAILED to install numpy"; exit 1)
-          pip install scipy || (echo "FAILED to install scipy"; exit 1)
-
-          # OpenCV is optional - installation may fail but we continue
-          pip install opencv-contrib-python 2>/dev/null || echo "Note: opencv-contrib-python not available (optional)"
-
-          # Ensure pytest is in PATH for mutmut subprocess
+          echo "=== Setting up PATH for mutmut ==="
           USER_BIN=$(python -m site --user-base)/bin
           mkdir -p "$USER_BIN"
           echo "$USER_BIN" >> $GITHUB_PATH
-
-          # Create 'python' symlink pointing to python3 (mutmut uses default 'python' command)
           ln -sf /usr/bin/python3 "$USER_BIN/python"
 
+          echo "=== Installed packages ==="
+          pip list | grep -E "mutmut|pytest|pathvalidate"
+
+      # Step 4: Validate baseline tests pass
+      - name: Verify baseline tests (without mutations)
+        run: |
+          set -e
+          echo "=== Running baseline tests ==="
           echo ""
-          echo "DEBUG: Installed packages:"
-          pip list | grep -E "mutmut|pytest|pathvalidate|numpy|ruamel|scipy" || echo "WARNING: Some packages not found in pip list"
 
-      - name: Validate module imports
-        id: validate
-        continue-on-error: true
+          pytest \
+            frigate/test/test_util_path.py \
+            frigate/test/test_builtin.py \
+            -v --tb=short \
+            --co -q 2>&1 | head -50
+
+          echo ""
+          echo "=== Executing baseline tests ==="
+          pytest \
+            frigate/test/test_util_path.py \
+            frigate/test/test_builtin.py \
+            -v --tb=short || exit 1
+
+          echo ""
+          echo "✅ Baseline tests PASSED - Ready for mutation testing"
+
+      # Step 5: Generate coverage data
+      - name: Generate coverage data
         run: |
-          echo "=== Validating module can be imported ==="
+          set -e
+          echo "=== Generating coverage data ==="
 
-          # Try to import the module to verify dependencies are installed
-          python3 << 'VALIDATE'
-          import sys
-          import importlib.util
+          coverage run -m pytest \
+            frigate/test/test_util_path.py \
+            frigate/test/test_builtin.py \
+            -q
 
-          module_path = "${{ matrix.module_path }}"
-          module_name = module_path.replace("frigate/", "").replace(".py", "").replace("/", ".")
-          print(f"Attempting to import: {module_name}")
+          coverage json -o coverage.json
 
-          try:
-              spec = importlib.util.spec_from_file_location(module_name, module_path)
-              module = importlib.util.module_from_spec(spec)
-              sys.modules[module_name] = module
-              spec.loader.exec_module(module)
-              print(f"✓ Successfully imported {module_name}")
-          except Exception as e:
-              print(f"✗ Failed to import {module_name}: {e}")
-              sys.exit(1)
-          VALIDATE
+          echo "✅ Coverage data generated"
 
-      - name: Run baseline pytest
-        id: baseline
-        continue-on-error: true
-        run: |
-          echo "=== Running baseline pytest on ${{ matrix.module_path }} ==="
-
-          # Run tests
-          pytest "${{ matrix.test_file }}" -v --tb=short 2>&1 | tee pytest_output.txt || true
-
-          # Extract statistics
-          if grep -q "passed" pytest_output.txt; then
-            PASSED=$(grep -oP '\d+(?= passed)' pytest_output.txt | head -1 || echo "0")
-          else
-            PASSED=0
-          fi
-
-          if grep -q "failed" pytest_output.txt; then
-            FAILED=$(grep -oP '\d+(?= failed)' pytest_output.txt | head -1 || echo "0")
-          else
-            FAILED=0
-          fi
-
-          TOTAL=$((PASSED + FAILED))
-
-          echo "passed=$PASSED" >> $GITHUB_OUTPUT
-          echo "failed=$FAILED" >> $GITHUB_OUTPUT
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
-
+      # Step 6: Run mutation testing
       - name: Run mutation testing
-        id: mutation
         continue-on-error: true
-        timeout-minutes: 30
         run: |
-          echo "=== Running Mutation Testing on ${{ matrix.module_path }} ==="
+          set -e
+          echo "=== Mutation Testing Configuration ==="
+          echo ""
+          cat .mutmut.ini
+          echo ""
 
           mkdir -p mutation-results
 
-          # Pre-check: verify pytest can find tests
-          echo "DEBUG: Checking if pytest can find tests in ${{ matrix.test_file }}"
-          pytest "${{ matrix.test_file }}" --collect-only -q 2>&1 | tee mutation-results/test-collection.log
-          TEST_COUNT=$(grep -c "test_" mutation-results/test-collection.log || echo "0")
-          echo "DEBUG: Found $TEST_COUNT tests"
-          echo ""
+          echo "=== Running mutmut on frigate/util/path.py ==="
+          python3 -m mutmut run \
+            --paths-to-mutate frigate/util/path.py \
+            2>&1 | tee mutation-results/path-mutations.log || true
 
-          # Run mutmut with verbose output
-          echo "DEBUG: Running mutmut on module: ${{ matrix.module_path }}"
-          echo "DEBUG: Test file: ${{ matrix.test_file }}"
-          echo "DEBUG: Working directory: $(pwd)"
-          echo "DEBUG: Python version: $(python3 --version)"
           echo ""
+          echo "=== Running mutmut on frigate/util/builtin.py ==="
+          python3 -m mutmut run \
+            --paths-to-mutate frigate/util/builtin.py \
+            2>&1 | tee mutation-results/builtin-mutations.log || true
 
-          # Run mutmut - uses default pytest test discovery and execution
-          # Note: mutmut 2.4.4 does NOT read test_cmd from config files
-          python3 -m mutmut run --paths-to-mutate "${{ matrix.module_path }}" 2>&1 | tee mutation-results/raw.log
+      # Step 7: Extract and report results
+      - name: Extract mutation results
+        if: always()
+        run: |
+          echo "=== Mutation Test Results ==="
 
-          MUTMUT_EXIT=$?
-          echo ""
-          echo "DEBUG: mutmut exit code: $MUTMUT_EXIT"
-          echo ""
-
-          # Show ALL mutmut output (not just last 50 lines)
-          echo "DEBUG: Full mutmut output:"
-          cat mutation-results/raw.log
-          echo ""
-
-          # Check cache directory
-          echo "DEBUG: Cache directory contents after mutmut:"
           if [ -d .mutmut-cache ]; then
-            ls -lah .mutmut-cache/
+            echo "✅ Mutations were generated and tested"
             echo ""
-            echo "DEBUG: Database file details:"
-            file .mutmut-cache/*.db 2>/dev/null || echo "No .db files found"
+            python3 -m mutmut results 2>&1 | head -100
           else
-            echo "Cache directory does not exist!"
+            echo "⚠️  No mutations were generated"
+            echo "Check logs above for details"
           fi
-          echo ""
-          echo "=== Extracting mutation statistics ==="
 
-          # Use Python to extract stats from mutmut's cache
-          python3 << 'EXTRACT_STATS' > mutation-results/metrics.json
-          import json
-          import sqlite3
-          import sys
-          from pathlib import Path
-
-          def debug_print(msg):
-              """Print debug output to stderr, not stdout (so JSON goes to file cleanly)"""
-              print(msg, file=sys.stderr, flush=True)
-
-          stats = {
-              "total": 0,
-              "killed": 0,
-              "survived": 0,
-              "skipped": 0,
-              "timeout": 0,
-              "no_tests": 0,
-              "errors": 0
-          }
-
-          # Try to find and parse mutmut's database
-          cache_dir = Path('.mutmut-cache')
-          debug_print(f"DEBUG: Cache dir exists: {cache_dir.exists()}")
-          debug_print(f"DEBUG: Cache dir path: {cache_dir.absolute()}")
-
-          if cache_dir.exists():
-              db_files = list(cache_dir.glob('*.db'))
-              debug_print(f"DEBUG: Found {len(db_files)} database files")
-
-              for db_file in db_files:
-                  debug_print(f"DEBUG: Processing {db_file.name}")
-                  try:
-                      conn = sqlite3.connect(str(db_file))
-                      cursor = conn.cursor()
-
-                      # List tables
-                      cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                      tables = cursor.fetchall()
-                      debug_print(f"DEBUG: Tables: {tables}")
-
-                      # Query mutation results
-                      cursor.execute('SELECT COUNT(*) FROM mutation_result')
-                      count = cursor.fetchone()[0]
-                      debug_print(f"DEBUG: mutation_result rows: {count}")
-
-                      if count > 0:
-                          cursor.execute('SELECT exit_code FROM mutation_result')
-                          for row in cursor:
-                              exit_code = row[0]
-                              stats['total'] += 1
-
-                              # Map exit codes to status
-                              if exit_code in [1, 3, -24]:
-                                  stats['killed'] += 1
-                              elif exit_code == 0:
-                                  stats['survived'] += 1
-                              elif exit_code == 34:
-                                  stats['skipped'] += 1
-                              elif exit_code in [24, 152, 255, -9, -11, 36]:
-                                  stats['timeout'] += 1
-                              elif exit_code in [5, 33]:
-                                  stats['no_tests'] += 1
-                              else:
-                                  stats['errors'] += 1
-
-                      conn.close()
-                  except Exception as e:
-                      debug_print(f"ERROR: Failed to read {db_file}: {e}")
-          else:
-              debug_print("DEBUG: Cache directory does not exist")
-
-          # Calculate score
-          if stats['total'] > 0:
-              stats['score'] = int(100 * stats['killed'] / stats['total'])
-          else:
-              stats['score'] = 0
-
-          # Add module information
-          output = {
-              "module_name": "${{ matrix.module_name }}",
-              "module_path": "${{ matrix.module_path }}",
-              "priority": "${{ matrix.priority }}",
-              "total_mutations": stats['total'],
-              "killed": stats['killed'],
-              "survived": stats['survived'],
-              "timeouts": stats['timeout'],
-              "errors": stats['errors'],
-              "skipped": stats['skipped'],
-              "score": stats['score']
-          }
-
-          print(json.dumps(output, indent=2))
-          EXTRACT_STATS
-
-          # Parse metrics and set outputs
-          python3 << 'SET_VARS'
-          import json
-          import os
-
-          with open('mutation-results/metrics.json') as f:
-              data = json.load(f)
-
-          # Write to GitHub Actions outputs
-          output_file = os.environ.get('GITHUB_OUTPUT', '')
-          if output_file:
-              with open(output_file, 'a') as f:
-                  f.write(f"total={data['total_mutations']}\n")
-                  f.write(f"killed={data['killed']}\n")
-                  f.write(f"survived={data['survived']}\n")
-                  f.write(f"timeouts={data['timeouts']}\n")
-                  f.write(f"errors={data['errors']}\n")
-                  f.write(f"skipped={data['skipped']}\n")
-                  f.write(f"score={data['score']}\n")
-
-          # Display summary
-          print()
-          print(f"📊 Module: {data['module_name']}")
-          print(f"   Total: {data['total_mutations']} | Killed: {data['killed']} | Survived: {data['survived']}")
-          print(f"   Score: {data['score']}%")
-          SET_VARS
-
+      # Step 8: Upload results
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutation-results-${{ matrix.module_name }}
-          path: mutation-results/
+          name: mutation-testing-results
+          path: |
+            mutation-results/
+            .mutmut.ini
+            coverage.json
           retention-days: 90
 
-  # Aggregation job - creates single master report
-  mutation-summary:
-    runs-on: ubuntu-22.04
-    name: Mutation Testing Summary
-    if: always()
-    needs: mutation-matrix
-
-    steps:
-      - name: Download all results
-        uses: actions/download-artifact@v4
-        with:
-          path: all-results
-
-      - name: Aggregate results and create summary
+      # Step 9: Summary
+      - name: Report summary
+        if: always()
         run: |
-          set +e
+          echo "## 🧬 Mutation Testing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Modules Tested:**" >> $GITHUB_STEP_SUMMARY
+          echo "- frigate/util/path.py" >> $GITHUB_STEP_SUMMARY
+          echo "- frigate/util/builtin.py" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Results:**" >> $GITHUB_STEP_SUMMARY
 
-          echo "=== Aggregating Mutation Testing Results ==="
-          echo ""
-          echo "DEBUG: Directory structure of all-results/"
-          find all-results -type f -name "*.json" 2>/dev/null | head -20
-          echo ""
-          echo "DEBUG: List of artifact directories"
-          ls -la all-results/ 2>/dev/null || echo "No all-results directory found"
-          echo ""
+          if [ -d .mutmut-cache ]; then
+            echo "✅ Mutation testing completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No mutations were generated - see job logs" >> $GITHUB_STEP_SUMMARY
+          fi
 
-          # Create master summary
-          {
-            echo "# 🧬 Mutation Testing - Master Report"
-            echo ""
-            echo "## Summary Table"
-            echo ""
-            echo "| Module | Test File | Total | Killed | Survived | Score | Status |"
-            echo "|--------|-----------|-------|--------|----------|-------|--------|"
-
-            # Process each module's results - check both possible locations
-            for artifact_dir in all-results/*/ all-results/mutation-results-*/; do
-              if [ -d "$artifact_dir" ]; then
-                echo "Checking directory: $artifact_dir"
-                # Look for metrics.json in the directory or subdirectories
-                metrics_file=$(find "$artifact_dir" -name "metrics.json" -type f | head -1)
-
-                if [ -f "$metrics_file" ]; then
-                  echo "Found metrics file: $metrics_file"
-                  echo "Content of metrics.json:"
-                  cat "$metrics_file"
-                  echo ""
-
-                  # Use jq if available, otherwise use grep
-                  if command -v jq &> /dev/null; then
-                    echo "Using jq for parsing..."
-                    module=$(jq -r '.module_name // "Unknown"' "$metrics_file" 2>/dev/null)
-                    test_file=$(jq -r '.module_path // "Unknown"' "$metrics_file" 2>/dev/null)
-                    total=$(jq -r '.total_mutations // 0' "$metrics_file" 2>/dev/null)
-                    killed=$(jq -r '.killed // 0' "$metrics_file" 2>/dev/null)
-                    survived=$(jq -r '.survived // 0' "$metrics_file" 2>/dev/null)
-                    score=$(jq -r '.score // 0' "$metrics_file" 2>/dev/null)
-                  else
-                    echo "Using grep for parsing..."
-                    # Use simple sed patterns
-                    module=$(sed -n 's/.*"module_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metrics_file" | head -1 || echo "Unknown")
-                    test_file=$(sed -n 's/.*"module_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metrics_file" | head -1 || echo "Unknown")
-                    total=$(sed -n 's/.*"total_mutations"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
-                    killed=$(sed -n 's/.*"killed"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
-                    survived=$(sed -n 's/.*"survived"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
-                    score=$(sed -n 's/.*"score"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
-                  fi
-
-                  echo "Parsed values: module=$module, total=$total, killed=$killed, score=$score"
-                  echo ""
-
-                  # Determine status
-                  if [ "$score" -ge 80 ]; then
-                    status="✅ Excellent"
-                  elif [ "$score" -ge 70 ]; then
-                    status="🟢 Good"
-                  elif [ "$score" -ge 60 ]; then
-                    status="🟡 Fair"
-                  else
-                    status="❌ Poor"
-                  fi
-
-                  # Output table row
-                  echo "| $module | \`$test_file\` | $total | $killed ✅ | $survived ❌ | $score% | $status |"
-                else
-                  echo "WARNING: No metrics.json found in $artifact_dir"
-                fi
-              fi
-            done
-
-            echo ""
-            echo "## Key Metrics"
-            echo ""
-            echo "- **Goal:** Achieve 80%+ mutation score across all modules"
-            echo "- **Action:** Review survived mutations and enhance tests accordingly"
-            echo ""
-            echo "---"
-            echo ""
-            echo "*Generated by Mutation Testing Matrix Workflow*"
-          } | tee master_summary.md >> $GITHUB_STEP_SUMMARY
-
-          echo "✅ Summary created successfully"
-
-      - name: Check mutation score threshold
-        run: |
-          echo "✅ Mutation testing workflow completed successfully"
-          echo "📊 Check the summary above for detailed results"
-
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 [View detailed results in artifacts](#artifacts)" >> $GITHUB_STEP_SUMMARY
