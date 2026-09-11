@@ -1,6 +1,14 @@
 [tool.ruff]
 target-version = "py311"
 
+[tool.mutmut]
+paths_to_mutate = "frigate"
+tests_dir = "frigate/test"
+test_time_multiplier = 1.5
+exclude_patterns = [ "frigate/test/", "migrations/", "docs/",]
+python_version = "3.11"
+test_cmd = "pytest --tb=short -q"
+
 [tool.ruff.lint]
-ignore = ["E501","E711","E712","UP031","UP032","UP042","G004"]
-extend-select = ["I", "UP", "G", "ASYNC210", "B904"]
+ignore = [ "E501", "E711", "E712", "UP031", "UP032", "UP042", "G004",]
+extend-select = [ "I", "UP", "G", "ASYNC210", "B904",]

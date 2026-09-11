@@ -89,6 +89,9 @@ jobs:
           # OpenCV is optional - installation may fail but we continue
           pip install opencv-contrib-python 2>/dev/null || echo "Note: opencv-contrib-python not available (optional)"
 
+          # Ensure pytest is in PATH for mutmut subprocess
+          echo "$(python -m site --user-base)/bin" >> $GITHUB_PATH
+
           echo ""
           echo "DEBUG: Installed packages:"
           pip list | grep -E "mutmut|pytest|pathvalidate|numpy|ruamel|scipy" || echo "WARNING: Some packages not found in pip list"
