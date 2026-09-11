@@ -228,8 +228,13 @@ jobs:
 
                 if [ -f "$metrics_file" ]; then
                   echo "Found metrics file: $metrics_file"
+                  echo "Content of metrics.json:"
+                  cat "$metrics_file"
+                  echo ""
+
                   # Use jq if available, otherwise use grep
                   if command -v jq &> /dev/null; then
+                    echo "Using jq for parsing..."
                     module=$(jq -r '.module_name // "Unknown"' "$metrics_file" 2>/dev/null)
                     test_file=$(jq -r '.module_path // "Unknown"' "$metrics_file" 2>/dev/null)
                     total=$(jq -r '.total_mutations // 0' "$metrics_file" 2>/dev/null)
@@ -237,14 +242,18 @@ jobs:
                     survived=$(jq -r '.survived // 0' "$metrics_file" 2>/dev/null)
                     score=$(jq -r '.score // 0' "$metrics_file" 2>/dev/null)
                   else
-                    # Fallback to grep with safer patterns
-                    module=$(grep -oP '"module_name"\s*:\s*"\K[^"]+' "$metrics_file" 2>/dev/null | head -1 || echo "Unknown")
-                    test_file=$(grep -oP '"module_path"\s*:\s*"\K[^"]+' "$metrics_file" 2>/dev/null | head -1 || echo "Unknown")
-                    total=$(grep -oP '"total_mutations"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
-                    killed=$(grep -oP '"killed"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
-                    survived=$(grep -oP '"survived"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
-                    score=$(grep -oP '"score"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
+                    echo "Using grep for parsing..."
+                    # Use simple sed patterns
+                    module=$(sed -n 's/.*"module_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metrics_file" | head -1 || echo "Unknown")
+                    test_file=$(sed -n 's/.*"module_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metrics_file" | head -1 || echo "Unknown")
+                    total=$(sed -n 's/.*"total_mutations"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
+                    killed=$(sed -n 's/.*"killed"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
+                    survived=$(sed -n 's/.*"survived"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
+                    score=$(sed -n 's/.*"score"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$metrics_file" | head -1 || echo "0")
                   fi
+
+                  echo "Parsed values: module=$module, total=$total, killed=$killed, score=$score"
+                  echo ""
 
                   # Determine status
                   if [ "$score" -ge 80 ]; then
