@@ -119,18 +119,28 @@ jobs:
             --no-progress 2>&1 | tee mutation-results/raw.log || true
 
           # Generate results
+          echo "Generating mutmut results..."
           mutmut results 2>&1 | tee mutation-results/results.txt || true
+
+          echo ""
+          echo "DEBUG: Content of results.txt:"
+          cat mutation-results/results.txt
+          echo ""
 
           # Parse results
           RESULTS_FILE="mutation-results/results.txt"
           if [ -f "$RESULTS_FILE" ]; then
+            echo "DEBUG: Parsing results from $RESULTS_FILE"
             TOTAL=$(grep -oP 'total=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             KILLED=$(grep -oP 'killed=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             SURVIVED=$(grep -oP 'survived=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             TIMEOUTS=$(grep -oP 'timeouts=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             ERRORS=$(grep -oP 'errors=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             SKIPPED=$(grep -oP 'skipped=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
+
+            echo "DEBUG: Extracted values - TOTAL=$TOTAL, KILLED=$KILLED, SURVIVED=$SURVIVED"
           else
+            echo "WARNING: Results file not found"
             TOTAL=0
             KILLED=0
             SURVIVED=0
