@@ -23,10 +23,6 @@ name: Unit Tests
 
 on:
   workflow_dispatch: # Keep only manual trigger for emergency use
-      - 'frigate/**'
-      - 'requirements*.txt'
-      - '.github/workflows/tests.yml'
-      - 'pytest.ini'
 
 concurrency:
   group: ${{ github.ref }}-tests
