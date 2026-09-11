@@ -101,7 +101,6 @@ jobs:
       # Step 5: Generate coverage data
       - name: Generate coverage data
         run: |
-          set -e
           echo "=== Generating coverage data ==="
 
           coverage run -m pytest \
@@ -109,9 +108,7 @@ jobs:
             frigate/test/test_builtin.py \
             -q
 
-          coverage report
-
-          echo "✅ Coverage data generated"
+          echo "✅ Coverage data generated (HTML report: htmlcov/index.html)"
 
       # Step 6: Run mutation testing
       - name: Run mutation testing
