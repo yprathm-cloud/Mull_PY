@@ -110,81 +110,114 @@ jobs:
 
           mkdir -p mutation-results
 
-          # Run mutmut with comprehensive output
-          mutmut run \
+          # Run mutmut
+          python3 -m mutmut run \
             --paths "${{ matrix.module_path }}" \
             --tests-dir frigate/test \
             --test-time-base 0.1 \
             --cache-dir .mutmut-cache \
             --no-progress 2>&1 | tee mutation-results/raw.log || true
 
-          # Generate results
-          echo "Generating mutmut results..."
-          mutmut results 2>&1 | tee mutation-results/results.txt || true
-
           echo ""
-          echo "DEBUG: Content of results.txt:"
-          cat mutation-results/results.txt
-          echo ""
+          echo "=== Extracting mutation statistics ==="
 
-          # Parse results
-          RESULTS_FILE="mutation-results/results.txt"
-          if [ -f "$RESULTS_FILE" ]; then
-            echo "DEBUG: Parsing results from $RESULTS_FILE"
-            TOTAL=$(grep -oP 'total=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
-            KILLED=$(grep -oP 'killed=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
-            SURVIVED=$(grep -oP 'survived=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
-            TIMEOUTS=$(grep -oP 'timeouts=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
-            ERRORS=$(grep -oP 'errors=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
-            SKIPPED=$(grep -oP 'skipped=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
+          # Use Python to extract stats from mutmut's cache
+          python3 << 'EXTRACT_STATS' > mutation-results/metrics.json
+          import json
+          import sqlite3
+          from pathlib import Path
 
-            echo "DEBUG: Extracted values - TOTAL=$TOTAL, KILLED=$KILLED, SURVIVED=$SURVIVED"
-          else
-            echo "WARNING: Results file not found"
-            TOTAL=0
-            KILLED=0
-            SURVIVED=0
-            TIMEOUTS=0
-            ERRORS=0
-            SKIPPED=0
-          fi
+          stats = {
+              "total": 0,
+              "killed": 0,
+              "survived": 0,
+              "skipped": 0,
+              "timeout": 0,
+              "no_tests": 0,
+              "errors": 0
+          }
+
+          # Try to find and parse mutmut's database
+          cache_dir = Path('.mutmut-cache')
+          if cache_dir.exists():
+              for db_file in cache_dir.glob('*.db'):
+                  try:
+                      conn = sqlite3.connect(str(db_file))
+                      cursor = conn.cursor()
+
+                      # Query mutation results
+                      cursor.execute('SELECT exit_code FROM mutation_result')
+                      for row in cursor:
+                          exit_code = row[0]
+                          stats['total'] += 1
+
+                          # Map exit codes to status
+                          if exit_code in [1, 3, -24]:
+                              stats['killed'] += 1
+                          elif exit_code == 0:
+                              stats['survived'] += 1
+                          elif exit_code == 34:
+                              stats['skipped'] += 1
+                          elif exit_code in [24, 152, 255, -9, -11, 36]:
+                              stats['timeout'] += 1
+                          elif exit_code in [5, 33]:
+                              stats['no_tests'] += 1
+                          else:
+                              stats['errors'] += 1
+
+                      conn.close()
+                  except Exception as e:
+                      print(f"Error reading database {db_file}: {e}")
 
           # Calculate score
-          if [ "$TOTAL" -gt 0 ]; then
-            SCORE=$((100 * KILLED / TOTAL))
-          else
-            SCORE=0
-          fi
+          if stats['total'] > 0:
+              stats['score'] = int(100 * stats['killed'] / stats['total'])
+          else:
+              stats['score'] = 0
 
-          # Save metrics to file for aggregation
-          cat > mutation-results/metrics.json << METRICSEOF
-          {
-            "module_name": "${{ matrix.module_name }}",
-            "module_path": "${{ matrix.module_path }}",
-            "priority": "${{ matrix.priority }}",
-            "total_mutations": $TOTAL,
-            "killed": $KILLED,
-            "survived": $SURVIVED,
-            "timeouts": $TIMEOUTS,
-            "errors": $ERRORS,
-            "skipped": $SKIPPED,
-            "score": $SCORE
+          # Add module information
+          output = {
+              "module_name": "${{ matrix.module_name }}",
+              "module_path": "${{ matrix.module_path }}",
+              "priority": "${{ matrix.priority }}",
+              "total_mutations": stats['total'],
+              "killed": stats['killed'],
+              "survived": stats['survived'],
+              "timeouts": stats['timeout'],
+              "errors": stats['errors'],
+              "skipped": stats['skipped'],
+              "score": stats['score']
           }
-          METRICSEOF
 
-          # Set outputs
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          echo "killed=$KILLED" >> $GITHUB_OUTPUT
-          echo "survived=$SURVIVED" >> $GITHUB_OUTPUT
-          echo "timeouts=$TIMEOUTS" >> $GITHUB_OUTPUT
-          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
-          echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
-          echo "score=$SCORE" >> $GITHUB_OUTPUT
+          print(json.dumps(output, indent=2))
+          EXTRACT_STATS
 
-          echo ""
-          echo "📊 Module: ${{ matrix.module_name }}"
-          echo "   Total: $TOTAL | Killed: $KILLED | Survived: $SURVIVED"
-          echo "   Score: $SCORE%"
+          # Parse metrics and set outputs
+          python3 << 'SET_VARS'
+          import json
+          import os
+
+          with open('mutation-results/metrics.json') as f:
+              data = json.load(f)
+
+          # Write to GitHub Actions outputs
+          output_file = os.environ.get('GITHUB_OUTPUT', '')
+          if output_file:
+              with open(output_file, 'a') as f:
+                  f.write(f"total={data['total_mutations']}\n")
+                  f.write(f"killed={data['killed']}\n")
+                  f.write(f"survived={data['survived']}\n")
+                  f.write(f"timeouts={data['timeouts']}\n")
+                  f.write(f"errors={data['errors']}\n")
+                  f.write(f"skipped={data['skipped']}\n")
+                  f.write(f"score={data['score']}\n")
+
+          # Display summary
+          print()
+          print(f"📊 Module: {data['module_name']}")
+          print(f"   Total: {data['total_mutations']} | Killed: {data['killed']} | Survived: {data['survived']}")
+          print(f"   Score: {data['score']}%")
+          SET_VARS
 
       - name: Upload results
         if: always()
