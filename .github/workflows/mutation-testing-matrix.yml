@@ -168,13 +168,19 @@ jobs:
 
           # Run mutmut with verbose output
           echo "DEBUG: Running mutmut on module: ${{ matrix.module_path }}"
-          echo "DEBUG: Using .mutmut.ini config (tests_dir, test_cmd, paths_to_mutate, etc)"
+          echo "DEBUG: Using pyproject.toml [tool.mutmut] config + CLI overrides for this module"
+          echo "DEBUG: Test file: ${{ matrix.test_file }}"
           echo "DEBUG: Working directory: $(pwd)"
           echo "DEBUG: Python version: $(python3 --version)"
           echo ""
 
-          # mutmut requires --paths-to-mutate to specify which code to mutate
-          python3 -m mutmut run --paths-to-mutate "${{ matrix.module_path }}" 2>&1 | tee mutation-results/raw.log
+          # Run mutmut with specific module path
+          # Config provides test_cmd, exclude patterns, etc.
+          # CLI args specify which module to mutate for this job
+          python3 -m mutmut run \
+            --paths-to-mutate "${{ matrix.module_path }}" \
+            --tests-dir "frigate/test" \
+            2>&1 | tee mutation-results/raw.log
 
           MUTMUT_EXIT=$?
           echo ""
