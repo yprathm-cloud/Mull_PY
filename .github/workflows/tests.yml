@@ -1,23 +1,28 @@
 name: Unit Tests
 
+# DISABLED: Triggers commented out for dedicated mutation testing focus
+# To re-enable, uncomment the 'on:' section below
+# on:
+#   workflow_dispatch:
+#   push:
+#     branches:
+#       - main
+#       - dev
+#       - master
+#     paths:
+#       - 'frigate/**'
+#       - 'requirements*.txt'
+#       - '.github/workflows/tests.yml'
+#       - 'pytest.ini'
+#   pull_request:
+#     branches:
+#       - main
+#       - dev
+#       - master
+#     paths:
+
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-      - dev
-      - master
-    paths:
-      - 'frigate/**'
-      - 'requirements*.txt'
-      - '.github/workflows/tests.yml'
-      - 'pytest.ini'
-  pull_request:
-    branches:
-      - main
-      - dev
-      - master
-    paths:
+  workflow_dispatch: # Keep only manual trigger for emergency use
       - 'frigate/**'
       - 'requirements*.txt'
       - '.github/workflows/tests.yml'

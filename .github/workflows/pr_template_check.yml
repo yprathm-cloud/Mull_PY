@@ -1,8 +1,13 @@
 name: PR template check
 
+# DISABLED: Triggers commented out for dedicated mutation testing focus
+# To re-enable, uncomment the 'on:' section below
+# on:
+#   pull_request_target:
+#     types: [opened, edited]
+
 on:
-  pull_request_target:
-    types: [opened, edited]
+  workflow_dispatch: # Keep only manual trigger for emergency use
 
 permissions:
   pull-requests: write

@@ -1,12 +1,17 @@
 name: On pull request
 
+# DISABLED: Triggers commented out for dedicated mutation testing focus
+# To re-enable, uncomment the 'on:' section below
+# on:
+#   pull_request:
+#     paths-ignore:
+#       - "docs/**"
+#       - ".github/*.yml"
+#       - ".github/DISCUSSION_TEMPLATE/**"
+#       - ".github/ISSUE_TEMPLATE/**"
+
 on:
-  pull_request:
-    paths-ignore:
-      - "docs/**"
-      - ".github/*.yml"
-      - ".github/DISCUSSION_TEMPLATE/**"
-      - ".github/ISSUE_TEMPLATE/**"
+  workflow_dispatch: # Keep only manual trigger for emergency use
 
 env:
   DEFAULT_PYTHON: 3.11

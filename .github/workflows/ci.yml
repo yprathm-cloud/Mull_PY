@@ -1,13 +1,18 @@
 name: CI
 
+# DISABLED: Triggers commented out for dedicated mutation testing focus
+# To re-enable, uncomment the 'on:' section below
+# on:
+#   workflow_dispatch:
+#   push:
+#     branches:
+#       - dev
+#       - master
+#     paths-ignore:
+#       - "docs/**"
+
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - dev
-      - master
-    paths-ignore:
-      - "docs/**"
+  workflow_dispatch: # Keep only manual trigger for emergency use
 
 # only run the latest commit to avoid cache overwrites
 concurrency:

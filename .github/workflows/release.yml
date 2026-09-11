@@ -1,9 +1,14 @@
 name: On release
 
+# DISABLED: Triggers commented out for dedicated mutation testing focus
+# To re-enable, uncomment the 'on:' section below
+# on:
+#   workflow_dispatch:
+#   release:
+#     types: [published]
+
 on:
-  workflow_dispatch:
-  release:
-    types: [published]
+  workflow_dispatch: # Keep only manual trigger for emergency use
 
 jobs:
   release:

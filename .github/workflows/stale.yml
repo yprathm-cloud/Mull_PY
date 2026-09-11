@@ -3,9 +3,15 @@
 # https://github.com/actions/stale
 
 name: "Stalebot"
+
+# DISABLED: Triggers commented out for dedicated mutation testing focus
+# To re-enable, uncomment the 'on:' section below
+# on:
+#   schedule:
+#     - cron: "0 0 * * *" # run stalebot once a day
+
 on:
-  schedule:
-    - cron: "0 0 * * *" # run stalebot once a day
+  workflow_dispatch: # Keep only manual trigger for emergency use
 
 jobs:
   stale:
