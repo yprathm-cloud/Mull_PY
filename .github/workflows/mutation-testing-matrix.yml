@@ -90,10 +90,12 @@ jobs:
           pip install opencv-contrib-python 2>/dev/null || echo "Note: opencv-contrib-python not available (optional)"
 
           # Ensure pytest is in PATH for mutmut subprocess
-          echo "$(python -m site --user-base)/bin" >> $GITHUB_PATH
+          USER_BIN=$(python -m site --user-base)/bin
+          mkdir -p "$USER_BIN"
+          echo "$USER_BIN" >> $GITHUB_PATH
 
           # Create 'python' symlink pointing to python3 (mutmut uses default 'python' command)
-          ln -sf /usr/bin/python3 $(python -m site --user-base)/bin/python
+          ln -sf /usr/bin/python3 "$USER_BIN/python"
 
           echo ""
           echo "DEBUG: Installed packages:"
