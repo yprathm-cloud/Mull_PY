@@ -165,13 +165,13 @@ jobs:
 
           # Run mutmut with verbose output
           echo "DEBUG: Running mutmut on module: ${{ matrix.module_path }}"
-          echo "DEBUG: Using .mutmut.ini config (tests_dir, test_cmd, etc)"
+          echo "DEBUG: Using .mutmut.ini config (tests_dir, test_cmd, paths_to_mutate, etc)"
           echo "DEBUG: Working directory: $(pwd)"
           echo "DEBUG: Python version: $(python3 --version)"
           echo ""
 
-          # mutmut reads from .mutmut.ini config file, so just pass the module path
-          python3 -m mutmut run "${{ matrix.module_path }}" 2>&1 | tee mutation-results/raw.log
+          # mutmut requires --paths-to-mutate to specify which code to mutate
+          python3 -m mutmut run --paths-to-mutate "${{ matrix.module_path }}" 2>&1 | tee mutation-results/raw.log
 
           MUTMUT_EXIT=$?
           echo ""
