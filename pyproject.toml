@@ -7,7 +7,6 @@ tests_dir = "frigate/test"
 test_time_multiplier = 1.5
 exclude_patterns = [ "frigate/test/", "migrations/", "docs/",]
 python_version = "3.11"
-test_cmd = "pytest --tb=short -q"
 
 [tool.ruff.lint]
 ignore = [ "E501", "E711", "E712", "UP031", "UP032", "UP042", "G004",]

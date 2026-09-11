@@ -30,7 +30,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: '3.11'
-  MUTMUT_VERSION: '2.4.5'
+  MUTMUT_VERSION: '2.4.4'
   PYTEST_VERSION: '8.4.0'
 
 jobs:
@@ -91,6 +91,9 @@ jobs:
 
           # Ensure pytest is in PATH for mutmut subprocess
           echo "$(python -m site --user-base)/bin" >> $GITHUB_PATH
+
+          # Create 'python' symlink pointing to python3 (mutmut uses default 'python' command)
+          ln -sf /usr/bin/python3 $(python -m site --user-base)/bin/python
 
           echo ""
           echo "DEBUG: Installed packages:"
@@ -168,12 +171,13 @@ jobs:
 
           # Run mutmut with verbose output
           echo "DEBUG: Running mutmut on module: ${{ matrix.module_path }}"
-          echo "DEBUG: Using .mutmut.ini config (tests_dir, test_cmd, paths_to_mutate, etc)"
+          echo "DEBUG: Test file: ${{ matrix.test_file }}"
           echo "DEBUG: Working directory: $(pwd)"
           echo "DEBUG: Python version: $(python3 --version)"
           echo ""
 
-          # mutmut requires --paths-to-mutate to specify which code to mutate
+          # Run mutmut - uses default pytest test discovery and execution
+          # Note: mutmut 2.4.4 does NOT read test_cmd from config files
           python3 -m mutmut run --paths-to-mutate "${{ matrix.module_path }}" 2>&1 | tee mutation-results/raw.log
 
           MUTMUT_EXIT=$?
