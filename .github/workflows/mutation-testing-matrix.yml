@@ -111,6 +111,8 @@ jobs:
           mkdir -p mutation-results
 
           # Run mutmut
+          echo "DEBUG: Running mutmut on paths: ${{ matrix.module_path }}"
+          echo "DEBUG: Tests directory: frigate/test"
           python3 -m mutmut run \
             --paths "${{ matrix.module_path }}" \
             --tests-dir frigate/test \
@@ -118,6 +120,12 @@ jobs:
             --cache-dir .mutmut-cache \
             --no-progress 2>&1 | tee mutation-results/raw.log || true
 
+          echo ""
+          echo "DEBUG: Last 50 lines of mutmut output:"
+          tail -50 mutation-results/raw.log
+          echo ""
+          echo "DEBUG: Cache directory contents:"
+          ls -lah .mutmut-cache/ 2>/dev/null || echo "Cache directory not found"
           echo ""
           echo "=== Extracting mutation statistics ==="
 
@@ -139,35 +147,54 @@ jobs:
 
           # Try to find and parse mutmut's database
           cache_dir = Path('.mutmut-cache')
+          print(f"DEBUG: Cache dir exists: {cache_dir.exists()}", flush=True)
+          print(f"DEBUG: Cache dir path: {cache_dir.absolute()}", flush=True)
+
           if cache_dir.exists():
-              for db_file in cache_dir.glob('*.db'):
+              db_files = list(cache_dir.glob('*.db'))
+              print(f"DEBUG: Found {len(db_files)} database files", flush=True)
+
+              for db_file in db_files:
+                  print(f"DEBUG: Processing {db_file.name}", flush=True)
                   try:
                       conn = sqlite3.connect(str(db_file))
                       cursor = conn.cursor()
 
-                      # Query mutation results
-                      cursor.execute('SELECT exit_code FROM mutation_result')
-                      for row in cursor:
-                          exit_code = row[0]
-                          stats['total'] += 1
+                      # List tables
+                      cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                      tables = cursor.fetchall()
+                      print(f"DEBUG: Tables: {tables}", flush=True)
 
-                          # Map exit codes to status
-                          if exit_code in [1, 3, -24]:
-                              stats['killed'] += 1
-                          elif exit_code == 0:
-                              stats['survived'] += 1
-                          elif exit_code == 34:
-                              stats['skipped'] += 1
-                          elif exit_code in [24, 152, 255, -9, -11, 36]:
-                              stats['timeout'] += 1
-                          elif exit_code in [5, 33]:
-                              stats['no_tests'] += 1
-                          else:
-                              stats['errors'] += 1
+                      # Query mutation results
+                      cursor.execute('SELECT COUNT(*) FROM mutation_result')
+                      count = cursor.fetchone()[0]
+                      print(f"DEBUG: mutation_result rows: {count}", flush=True)
+
+                      if count > 0:
+                          cursor.execute('SELECT exit_code FROM mutation_result')
+                          for row in cursor:
+                              exit_code = row[0]
+                              stats['total'] += 1
+
+                              # Map exit codes to status
+                              if exit_code in [1, 3, -24]:
+                                  stats['killed'] += 1
+                              elif exit_code == 0:
+                                  stats['survived'] += 1
+                              elif exit_code == 34:
+                                  stats['skipped'] += 1
+                              elif exit_code in [24, 152, 255, -9, -11, 36]:
+                                  stats['timeout'] += 1
+                              elif exit_code in [5, 33]:
+                                  stats['no_tests'] += 1
+                              else:
+                                  stats['errors'] += 1
 
                       conn.close()
                   except Exception as e:
-                      print(f"Error reading database {db_file}: {e}")
+                      print(f"ERROR: Failed to read {db_file}: {e}", flush=True)
+          else:
+              print("DEBUG: Cache directory does not exist", flush=True)
 
           # Calculate score
           if stats['total'] > 0:
