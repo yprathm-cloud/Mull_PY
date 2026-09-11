@@ -199,85 +199,68 @@ jobs:
 
       - name: Aggregate results and create summary
         run: |
-          set +e  # Don't exit on errors
+          set +e
 
           echo "=== Aggregating Mutation Testing Results ==="
-          echo "Looking for results in: all-results/"
-          ls -la all-results/ || echo "No all-results directory"
 
           # Create master summary
-          cat > master_summary.md << 'EOF'
-          # 🧬 Mutation Testing - Master Report
+          {
+            echo "# 🧬 Mutation Testing - Master Report"
+            echo ""
+            echo "## Summary Table"
+            echo ""
+            echo "| Module | Test File | Total | Killed | Survived | Score | Status |"
+            echo "|--------|-----------|-------|--------|----------|-------|--------|"
 
-          ## Summary Table
+            # Process each module's results
+            for artifact_dir in all-results/*/; do
+              if [ -d "$artifact_dir" ] && [ -f "$artifact_dir/metrics.json" ]; then
+                # Use jq if available, otherwise grep
+                if command -v jq &> /dev/null; then
+                  module=$(jq -r '.module_name' "$artifact_dir/metrics.json" 2>/dev/null || echo "Unknown")
+                  test_file=$(jq -r '.module_path' "$artifact_dir/metrics.json" 2>/dev/null || echo "Unknown")
+                  total=$(jq -r '.total_mutations' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
+                  killed=$(jq -r '.killed' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
+                  survived=$(jq -r '.survived' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
+                  score=$(jq -r '.score' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
+                else
+                  # Fallback to grep with safer patterns
+                  module=$(sed -n 's/.*"module_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$artifact_dir/metrics.json" | head -1)
+                  test_file=$(sed -n 's/.*"module_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$artifact_dir/metrics.json" | head -1)
+                  total=$(sed -n 's/.*"total_mutations"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
+                  killed=$(sed -n 's/.*"killed"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
+                  survived=$(sed -n 's/.*"survived"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
+                  score=$(sed -n 's/.*"score"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
+                fi
 
-          | Module | Test File | Total | Killed | Survived | Score | Status |
-          |--------|-----------|-------|--------|----------|-------|--------|
-          EOF
+                # Determine status
+                if [ "$score" -ge 80 ]; then
+                  status="✅ Excellent"
+                elif [ "$score" -ge 70 ]; then
+                  status="🟢 Good"
+                elif [ "$score" -ge 60 ]; then
+                  status="🟡 Fair"
+                else
+                  status="❌ Poor"
+                fi
 
-          # Process each module's results - more robust parsing
-          for artifact_dir in all-results/*/; do
-            if [ -d "$artifact_dir" ]; then
-              echo "Processing: $artifact_dir"
-              ls -la "$artifact_dir" || echo "Empty directory"
-
-              metrics_file="$artifact_dir/metrics.json"
-              if [ -f "$metrics_file" ]; then
-                echo "Found metrics.json in $artifact_dir"
-
-                # Use python for JSON parsing (more reliable)
-                python3 << PYSCRIPT
-import json
-try:
-    with open("$metrics_file", "r") as f:
-        data = json.load(f)
-        module = data.get("module_name", "Unknown")
-        test_file = data.get("module_path", "Unknown")
-        total = data.get("total_mutations", 0)
-        killed = data.get("killed", 0)
-        survived = data.get("survived", 0)
-        score = data.get("score", 0)
-
-        # Determine status
-        if score >= 80:
-            status = "✅ Excellent"
-        elif score >= 70:
-            status = "🟢 Good"
-        elif score >= 60:
-            status = "🟡 Fair"
-        else:
-            status = "❌ Poor"
-
-        # Print table row
-        print(f"| {module} | \`{test_file}\` | {total} | {killed} ✅ | {survived} ❌ | {score}% | {status} |")
-except Exception as e:
-    print(f"Error parsing JSON: {e}")
-PYSCRIPT
-
-              else
-                echo "No metrics.json found in $artifact_dir"
+                # Output table row
+                echo "| $module | \`$test_file\` | $total | $killed ✅ | $survived ❌ | $score% | $status |"
               fi
-            fi
-          done >> master_summary.md
+            done
 
-          # Add footer
-          cat >> master_summary.md << 'EOF'
-
-          ## Key Metrics
-
-          - **Goal:** Achieve 80%+ mutation score across all modules
-          - **Action:** Review survived mutations and enhance tests accordingly
-
-          ---
-
-          *Generated by Mutation Testing Matrix Workflow*
-          EOF
-
-          # Output to GitHub summary
-          cat master_summary.md >> $GITHUB_STEP_SUMMARY
+            echo ""
+            echo "## Key Metrics"
+            echo ""
+            echo "- **Goal:** Achieve 80%+ mutation score across all modules"
+            echo "- **Action:** Review survived mutations and enhance tests accordingly"
+            echo ""
+            echo "---"
+            echo ""
+            echo "*Generated by Mutation Testing Matrix Workflow*"
+          } | tee master_summary.md >> $GITHUB_STEP_SUMMARY
 
           echo "✅ Summary created successfully"
-          cat master_summary.md
 
       - name: Check mutation score threshold
         run: |
