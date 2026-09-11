@@ -68,10 +68,47 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
+
+          # Install test framework and mutation testing tools
           pip install -q pytest==${{ env.PYTEST_VERSION }} pytest-cov pytest-mock coverage mutmut==${{ env.MUTMUT_VERSION }}
+
+          # Install test requirements if available
           if [ -f requirements-test.txt ]; then
             pip install -q -r requirements-test.txt
           fi
+
+          # Install project dependencies required for mutation testing
+          # These are needed to import the modules we're testing
+          pip install -q pathvalidate ruamel.yaml numpy scipy opencv-contrib-python 2>/dev/null || true
+
+          echo "DEBUG: Installed packages:"
+          pip list | grep -E "mutmut|pytest|pathvalidate|numpy|yaml|opencv"
+
+      - name: Validate module imports
+        id: validate
+        continue-on-error: true
+        run: |
+          echo "=== Validating module can be imported ==="
+
+          # Try to import the module to verify dependencies are installed
+          python3 << 'VALIDATE'
+          import sys
+          import importlib.util
+
+          module_path = "${{ matrix.module_path }}"
+          module_name = module_path.replace("frigate/", "").replace(".py", "").replace("/", ".")
+          print(f"Attempting to import: {module_name}")
+
+          try:
+              spec = importlib.util.spec_from_file_location(module_name, module_path)
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[module_name] = module
+              spec.loader.exec_module(module)
+              print(f"✓ Successfully imported {module_name}")
+          except Exception as e:
+              print(f"✗ Failed to import {module_name}: {e}")
+              sys.exit(1)
+          VALIDATE
 
       - name: Run baseline pytest
         id: baseline
