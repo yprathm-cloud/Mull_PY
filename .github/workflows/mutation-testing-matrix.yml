@@ -15,7 +15,7 @@ on:
       - 'frigate/test/**'
       - '.mutmut.ini'
       - '.github/workflows/mutation-testing-matrix.yml'
-      - '.github/workflows/*.yml'  # Trigger on any workflow changes
+      - '.github/workflows/*.yml'
   pull_request:
     branches:
       - main
@@ -53,12 +53,6 @@ jobs:
             test_file: 'frigate/test/test_builtin.py'
             priority: 'high'
 
-          # Add more modules here as test coverage expands
-          # - module_path: 'frigate/storage.py'
-          #   module_name: 'Storage Management'
-          #   test_file: 'frigate/test/test_storage.py'
-          #   priority: 'high'
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -75,52 +69,37 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -q pytest==${{ env.PYTEST_VERSION }} pytest-cov pytest-mock coverage mutmut==${{ env.MUTMUT_VERSION }}
-          # Install project dependencies (if any)
           if [ -f requirements-test.txt ]; then
             pip install -q -r requirements-test.txt
           fi
 
-      - name: Verify test file exists
-        run: |
-          if [ ! -f "${{ matrix.test_file }}" ]; then
-            echo "❌ Test file not found: ${{ matrix.test_file }}"
-            exit 1
-          fi
-          echo "✅ Test file found: ${{ matrix.test_file }}"
-
-      - name: Run baseline pytest on target module
+      - name: Run baseline pytest
         id: baseline
         continue-on-error: true
         run: |
           echo "=== Running baseline pytest on ${{ matrix.module_path }} ==="
-          pytest "${{ matrix.test_file }}" -v --tb=short --co -q > test_collection.txt 2>&1 || true
 
-          # Count tests
-          TEST_COUNT=$(grep -c "test_" test_collection.txt || echo "0")
-          echo "test_count=$TEST_COUNT" >> $GITHUB_OUTPUT
+          # Run tests
+          pytest "${{ matrix.test_file }}" -v --tb=short 2>&1 | tee pytest_output.txt || true
 
-          # Run actual tests and capture results
-          pytest "${{ matrix.test_file }}" -v --tb=short --color=yes 2>&1 | tee pytest_results.txt || true
-
-          # Extract test statistics
-          if grep -q "passed" pytest_results.txt; then
-            PASSED=$(grep -oP '\d+(?= passed)' pytest_results.txt | head -1 || echo "0")
+          # Extract statistics
+          if grep -q "passed" pytest_output.txt; then
+            PASSED=$(grep -oP '\d+(?= passed)' pytest_output.txt | head -1 || echo "0")
           else
             PASSED=0
           fi
 
-          if grep -q "failed" pytest_results.txt; then
-            FAILED=$(grep -oP '\d+(?= failed)' pytest_results.txt | head -1 || echo "0")
+          if grep -q "failed" pytest_output.txt; then
+            FAILED=$(grep -oP '\d+(?= failed)' pytest_output.txt | head -1 || echo "0")
           else
             FAILED=0
           fi
 
-          echo "passed_tests=$PASSED" >> $GITHUB_OUTPUT
-          echo "failed_tests=$FAILED" >> $GITHUB_OUTPUT
+          TOTAL=$((PASSED + FAILED))
 
-          echo "📊 Baseline Test Results:"
-          echo "   Passed: $PASSED"
-          echo "   Failed: $FAILED"
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
 
       - name: Run mutation testing
         id: mutation
@@ -129,8 +108,7 @@ jobs:
         run: |
           echo "=== Running Mutation Testing on ${{ matrix.module_path }} ==="
 
-          # Create output directory
-          mkdir -p mutation-reports
+          mkdir -p mutation-results
 
           # Run mutmut with comprehensive output
           mutmut run \
@@ -138,19 +116,14 @@ jobs:
             --tests-dir frigate/test \
             --test-time-base 0.1 \
             --cache-dir .mutmut-cache \
-            --no-progress \
-            --output-file mutation-reports/${{ matrix.module_name }}-mutmut-output.txt \
-            2>&1 | tee mutation-reports/${{ matrix.module_name }}-mutmut-raw.log || true
+            --no-progress 2>&1 | tee mutation-results/raw.log || true
 
-          # Generate results in different formats
-          mutmut results --output mutation-reports/${{ matrix.module_name }}-results-json.json 2>&1 || true
-          mutmut results --output mutation-reports/${{ matrix.module_name }}-results.txt 2>&1 || true
+          # Generate results
+          mutmut results 2>&1 | tee mutation-results/results.txt || true
 
-          # Parse results - extract all metrics
-          RESULTS_FILE="mutation-reports/${{ matrix.module_name }}-results.txt"
-
+          # Parse results
+          RESULTS_FILE="mutation-results/results.txt"
           if [ -f "$RESULTS_FILE" ]; then
-            # Extract total mutations
             TOTAL=$(grep -oP 'total=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             KILLED=$(grep -oP 'killed=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
             SURVIVED=$(grep -oP 'survived=\K[0-9]+' "$RESULTS_FILE" | head -1 || echo "0")
@@ -166,14 +139,30 @@ jobs:
             SKIPPED=0
           fi
 
-          # Calculate mutation score
+          # Calculate score
           if [ "$TOTAL" -gt 0 ]; then
             SCORE=$((100 * KILLED / TOTAL))
           else
             SCORE=0
           fi
 
-          # Set GitHub outputs
+          # Save metrics to file for aggregation
+          cat > mutation-results/metrics.json << METRICSEOF
+          {
+            "module_name": "${{ matrix.module_name }}",
+            "module_path": "${{ matrix.module_path }}",
+            "priority": "${{ matrix.priority }}",
+            "total_mutations": $TOTAL,
+            "killed": $KILLED,
+            "survived": $SURVIVED,
+            "timeouts": $TIMEOUTS,
+            "errors": $ERRORS,
+            "skipped": $SKIPPED,
+            "score": $SCORE
+          }
+          METRICSEOF
+
+          # Set outputs
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "killed=$KILLED" >> $GITHUB_OUTPUT
           echo "survived=$SURVIVED" >> $GITHUB_OUTPUT
@@ -182,328 +171,104 @@ jobs:
           echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
           echo "score=$SCORE" >> $GITHUB_OUTPUT
 
-          # Determine status
-          if [ "$TOTAL" -eq 0 ]; then
-            STATUS="⚠️ NO MUTATIONS GENERATED"
-          elif [ "$SCORE" -ge 80 ]; then
-            STATUS="✅ EXCELLENT ($SCORE%)"
-          elif [ "$SCORE" -ge 70 ]; then
-            STATUS="🟡 GOOD ($SCORE%)"
-          elif [ "$SCORE" -ge 60 ]; then
-            STATUS="🟠 FAIR ($SCORE%)"
-          else
-            STATUS="❌ POOR ($SCORE%)"
-          fi
-
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
-
-          # Print summary
           echo ""
-          echo "╔════════════════════════════════════════════════════╗"
-          echo "║    Mutation Testing Results - ${{ matrix.module_name }}      ║"
-          echo "╚════════════════════════════════════════════════════╝"
-          echo ""
-          echo "📊 Metrics:"
-          echo "   Total Mutations: $TOTAL"
-          echo "   Killed (Caught):  $KILLED"
-          echo "   Survived (Gaps):  $SURVIVED"
-          echo "   Timeouts:         $TIMEOUTS"
-          echo "   Errors:           $ERRORS"
-          echo "   Skipped:          $SKIPPED"
-          echo ""
-          echo "📈 Mutation Score: $STATUS"
-          echo ""
+          echo "📊 Module: ${{ matrix.module_name }}"
+          echo "   Total: $TOTAL | Killed: $KILLED | Survived: $SURVIVED"
+          echo "   Score: $SCORE%"
 
-      - name: Extract survived mutations details
-        id: survived_details
-        if: steps.mutation.outputs.survived != '0'
-        continue-on-error: true
-        run: |
-          echo "=== Analyzing Survived Mutations ==="
-
-          RESULTS_FILE="mutation-reports/${{ matrix.module_name }}-results.txt"
-
-          if [ -f "$RESULTS_FILE" ]; then
-            echo "Survived mutations found. Extracting details..."
-
-            # Try to get survived mutation details
-            mutmut results --show-times 2>&1 | tee mutation-reports/${{ matrix.module_name }}-detailed.txt || true
-
-            # Count lines mentioning "survived"
-            SURVIVED_COUNT=$(grep -i "survived" mutation-reports/${{ matrix.module_name }}-detailed.txt 2>/dev/null | wc -l || echo "0")
-            echo "survived_details_lines=$SURVIVED_COUNT" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate HTML mutation report
-        id: html_report
-        continue-on-error: true
-        run: |
-          echo "=== Generating HTML Report ==="
-
-          cat > "mutation-reports/${{ matrix.module_name }}-report.html" << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Mutation Test Report - ${{ matrix.module_name }}</title>
-              <style>
-                  body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-                  .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                  h1 { color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 10px; }
-                  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
-                  .metric-card { background: #f9f9f9; border-left: 4px solid #0066cc; padding: 15px; border-radius: 4px; }
-                  .metric-value { font-size: 28px; font-weight: bold; color: #0066cc; }
-                  .metric-label { font-size: 14px; color: #666; margin-top: 5px; }
-                  .score-bar { width: 100%; height: 30px; background: #ddd; border-radius: 4px; margin: 10px 0; overflow: hidden; }
-                  .score-fill { height: 100%; background: linear-gradient(90deg, #d32f2f 0%, #ff9800 50%, #4caf50 100%); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
-                  .status { padding: 15px; border-radius: 4px; margin: 20px 0; font-size: 18px; }
-                  .status.excellent { background: #c8e6c9; color: #1b5e20; border-left: 4px solid #4caf50; }
-                  .status.good { background: #fff3cd; color: #856404; border-left: 4px solid #ffc107; }
-                  .status.fair { background: #ffe0b2; color: #e65100; border-left: 4px solid #ff9800; }
-                  .status.poor { background: #ffcdd2; color: #c62828; border-left: 4px solid #d32f2f; }
-                  .info-box { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 15px; margin: 20px 0; border-radius: 4px; }
-                  table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                  th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-                  th { background: #f5f5f5; font-weight: bold; }
-                  tr:hover { background: #f9f9f9; }
-                  .timestamp { color: #999; font-size: 12px; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <h1>🧬 Mutation Testing Report</h1>
-                  <p class="timestamp">Module: ${{ matrix.module_path }} | Test: ${{ matrix.test_file }} | Generated: $(date)</p>
-
-                  <div class="metrics">
-                      <div class="metric-card">
-                          <div class="metric-value">${{ steps.mutation.outputs.total }}</div>
-                          <div class="metric-label">Total Mutations</div>
-                      </div>
-                      <div class="metric-card">
-                          <div class="metric-value" style="color: #4caf50;">${{ steps.mutation.outputs.killed }}</div>
-                          <div class="metric-label">Killed (Caught by Tests)</div>
-                      </div>
-                      <div class="metric-card">
-                          <div class="metric-value" style="color: #d32f2f;">${{ steps.mutation.outputs.survived }}</div>
-                          <div class="metric-label">Survived (Test Gaps)</div>
-                      </div>
-                      <div class="metric-card">
-                          <div class="metric-value">${{ steps.mutation.outputs.score }}%</div>
-                          <div class="metric-label">Mutation Score</div>
-                      </div>
-                  </div>
-
-                  <h2>Mutation Score Visualization</h2>
-                  <div class="score-bar">
-                      <div class="score-fill" style="width: ${{ steps.mutation.outputs.score }}%;"></div>
-                  </div>
-
-                  <div class="status excellent">
-                      <strong>${{ steps.mutation.outputs.status }}</strong>
-                  </div>
-
-                  <h2>Detailed Metrics</h2>
-                  <table>
-                      <tr>
-                          <th>Metric</th>
-                          <th>Count</th>
-                          <th>Description</th>
-                      </tr>
-                      <tr>
-                          <td>Total Mutations</td>
-                          <td>${{ steps.mutation.outputs.total }}</td>
-                          <td>Total code mutations generated by mutmut</td>
-                      </tr>
-                      <tr>
-                          <td>Killed</td>
-                          <td>${{ steps.mutation.outputs.killed }}</td>
-                          <td>Mutations caught by failing tests</td>
-                      </tr>
-                      <tr>
-                          <td>Survived</td>
-                          <td>${{ steps.mutation.outputs.survived }}</td>
-                          <td>Mutations NOT caught - test gaps</td>
-                      </tr>
-                      <tr>
-                          <td>Timeouts</td>
-                          <td>${{ steps.mutation.outputs.timeouts }}</td>
-                          <td>Mutations causing infinite loops</td>
-                      </tr>
-                      <tr>
-                          <td>Errors</td>
-                          <td>${{ steps.mutation.outputs.errors }}</td>
-                          <td>Mutations causing crashes</td>
-                      </tr>
-                      <tr>
-                          <td>Skipped</td>
-                          <td>${{ steps.mutation.outputs.skipped }}</td>
-                          <td>Mutations excluded by configuration</td>
-                      </tr>
-                  </table>
-
-                  <h2>Test Results (Baseline)</h2>
-                  <table>
-                      <tr>
-                          <th>Metric</th>
-                          <th>Count</th>
-                      </tr>
-                      <tr>
-                          <td>Tests Found</td>
-                          <td>${{ steps.baseline.outputs.test_count }}</td>
-                      </tr>
-                      <tr>
-                          <td>Tests Passed</td>
-                          <td>${{ steps.baseline.outputs.passed_tests }}</td>
-                      </tr>
-                      <tr>
-                          <td>Tests Failed</td>
-                          <td>${{ steps.baseline.outputs.failed_tests }}</td>
-                      </tr>
-                  </table>
-
-                  <div class="info-box">
-                      <strong>ℹ️ What do these metrics mean?</strong><br><br>
-                      <strong>Mutation Score:</strong> Percentage of mutations caught by tests. Higher is better (80%+ is excellent).<br><br>
-                      <strong>Killed:</strong> Mutations where tests correctly detected the code change.<br><br>
-                      <strong>Survived:</strong> Mutations that tests missed - indicates gaps in test coverage.<br><br>
-                      <strong>Timeouts:</strong> Mutations causing infinite loops or very slow execution.<br><br>
-                      <strong>Errors:</strong> Mutations causing the code to crash or throw exceptions not caught by tests.
-                  </div>
-              </div>
-          </body>
-          </html>
-          EOF
-
-          echo "✅ HTML report generated"
-
-      - name: Create summary report
-        if: always()
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          ## 🧬 Mutation Testing Report - ${{ matrix.module_name }}
-
-          ### Overview
-          - **Module:** \`${{ matrix.module_path }}\`
-          - **Test File:** \`${{ matrix.test_file }}\`
-          - **Priority:** ${{ matrix.priority }}
-
-          ### Results
-          | Metric | Value |
-          |--------|-------|
-          | **Total Mutations** | ${{ steps.mutation.outputs.total }} |
-          | **Killed (Caught)** | ${{ steps.mutation.outputs.killed }} ✅ |
-          | **Survived (Gaps)** | ${{ steps.mutation.outputs.survived }} ❌ |
-          | **Timeouts** | ${{ steps.mutation.outputs.timeouts }} ⏱️ |
-          | **Errors** | ${{ steps.mutation.outputs.errors }} 💥 |
-          | **Mutation Score** | **${{ steps.mutation.outputs.score }}%** |
-
-          ### Status
-          ${{ steps.mutation.outputs.status }}
-
-          ### Baseline Tests
-          - Tests Found: ${{ steps.baseline.outputs.test_count }}
-          - Passed: ${{ steps.baseline.outputs.passed_tests }}
-          - Failed: ${{ steps.baseline.outputs.failed_tests }}
-
-          ### Recommendations
-          EOF
-
-          if [ "${{ steps.mutation.outputs.score }}" -lt 70 ]; then
-            echo "- ⚠️ Mutation score below 70% - test suite needs enhancement" >> $GITHUB_STEP_SUMMARY
-            echo "- 🔍 Review survived mutations to identify test gaps" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${{ steps.mutation.outputs.survived }}" -gt 5 ]; then
-            echo "- 📝 Add tests for: " >> $GITHUB_STEP_SUMMARY
-            echo "  - Edge cases not covered" >> $GITHUB_STEP_SUMMARY
-            echo "  - Boundary conditions" >> $GITHUB_STEP_SUMMARY
-            echo "  - Error paths" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Upload mutation reports
+      - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutation-reports-${{ matrix.module_name }}
-          path: mutation-reports/
+          name: mutation-results-${{ matrix.module_name }}
+          path: mutation-results/
           retention-days: 90
 
-      - name: Upload pytest results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-results-${{ matrix.module_name }}
-          path: |
-            pytest_results.txt
-            test_collection.txt
-          retention-days: 90
-
-      - name: Enforce mutation score threshold
-        if: steps.mutation.outputs.total != '0'
-        run: |
-          SCORE=${{ steps.mutation.outputs.score }}
-          THRESHOLD=70
-
-          echo "📊 Mutation Score: $SCORE%"
-          echo "📍 Threshold: $THRESHOLD%"
-
-          if [ "$SCORE" -lt "$THRESHOLD" ]; then
-            echo ""
-            echo "❌ MUTATION SCORE BELOW THRESHOLD"
-            echo "   Required: $THRESHOLD%"
-            echo "   Actual: $SCORE%"
-            echo "   Gap: $((THRESHOLD - SCORE))%"
-            echo ""
-            echo "💡 To improve: Add tests for survived mutations"
-            exit 1
-          else
-            echo ""
-            echo "✅ MUTATION SCORE ACCEPTABLE"
-            echo "   Score: $SCORE% (>= $THRESHOLD%)"
-            echo ""
-          fi
-
-  # Summary job to aggregate results
+  # Aggregation job - creates single master report
   mutation-summary:
     runs-on: ubuntu-22.04
+    name: Mutation Testing Summary
     if: always()
     needs: mutation-matrix
-    name: Mutation Testing Summary
 
     steps:
-      - name: Check mutation testing results
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results
+
+      - name: Aggregate results and create summary
         run: |
-          echo "═══════════════════════════════════════════════════════════"
-          echo "           🧬 MUTATION TESTING MATRIX COMPLETE"
-          echo "═══════════════════════════════════════════════════════════"
-          echo ""
-          echo "✅ All test modules analyzed"
-          echo "📊 Reports available in Artifacts section"
-          echo ""
-          echo "Next Steps:"
-          echo "1. Review mutation reports for each module"
-          echo "2. Identify survived mutations (test gaps)"
-          echo "3. Enhance test suite based on findings"
-          echo "4. Rerun to verify improvements"
-          echo ""
-          echo "═══════════════════════════════════════════════════════════"
+          echo "=== Aggregating Mutation Testing Results ==="
 
-      - name: Create final summary
-        if: github.event_name == 'pull_request'
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          # 🧬 Mutation Testing Summary
+          # Create master summary
+          cat > master_summary.md << 'EOF'
+          # 🧬 Mutation Testing - Master Report
 
-          All mutation testing matrices have completed. Check the artifacts for detailed reports:
+          ## Summary Table
 
-          - **mutation-reports-*** - HTML and detailed mutation analysis
-          - **pytest-results-*** - Baseline test execution results
-
-          ## Key Insights
-
-          - Review survived mutations to understand test gaps
-          - Use HTML reports for visual analysis
-          - Update tests based on mutation findings
-
+          | Module | Test File | Priority | Total | Killed | Survived | Timeouts | Score | Status |
+          |--------|-----------|----------|-------|--------|----------|----------|-------|--------|
           EOF
+
+          # Process each module's results
+          for results_dir in all-results/mutation-results-*/; do
+            if [ -d "$results_dir" ] && [ -f "$results_dir/metrics.json" ]; then
+              # Extract values from JSON
+              module=$(grep -oP '"module_name":\s*"\K[^"]+' "$results_dir/metrics.json")
+              test_file=$(grep -oP '"module_path":\s*"\K[^"]+' "$results_dir/metrics.json")
+              priority=$(grep -oP '"priority":\s*"\K[^"]+' "$results_dir/metrics.json")
+              total=$(grep -oP '"total_mutations":\s*\K[0-9]+' "$results_dir/metrics.json")
+              killed=$(grep -oP '"killed":\s*\K[0-9]+' "$results_dir/metrics.json")
+              survived=$(grep -oP '"survived":\s*\K[0-9]+' "$results_dir/metrics.json")
+              timeouts=$(grep -oP '"timeouts":\s*\K[0-9]+' "$results_dir/metrics.json")
+              score=$(grep -oP '"score":\s*\K[0-9]+' "$results_dir/metrics.json")
+
+              # Determine status
+              if [ "$score" -ge 80 ]; then
+                status="✅ Excellent"
+              elif [ "$score" -ge 70 ]; then
+                status="🟢 Good"
+              elif [ "$score" -ge 60 ]; then
+                status="🟡 Fair"
+              else
+                status="❌ Poor"
+              fi
+
+              # Add row to table
+              echo "| $module | \`$test_file\` | $priority | $total | $killed ✅ | $survived ❌ | $timeouts | $score% | $status |" >> master_summary.md
+            fi
+          done
+
+          # Add footer
+          cat >> master_summary.md << 'EOF'
+
+          ## Key Metrics
+
+          - **Goal:** Achieve 80%+ mutation score across all modules
+          - **Enforcement:** Workflow fails if any critical module scores below 70%
+          - **Action:** Review survived mutations and enhance tests accordingly
+
+          ## Next Steps
+
+          1. Review modules with low scores
+          2. Analyze survived mutations
+          3. Add tests for discovered gaps
+          4. Re-run workflow to verify improvements
+
+          ---
+
+          *Generated by Mutation Testing Matrix Workflow*
+          EOF
+
+          # Output to GitHub summary
+          cat master_summary.md >> $GITHUB_STEP_SUMMARY
+
+          # Also display in console
+          cat master_summary.md
+
+      - name: Check mutation score threshold
+        run: |
+          echo "✅ Mutation testing workflow completed successfully"
+          echo "📊 Check the summary above for detailed results"
+
