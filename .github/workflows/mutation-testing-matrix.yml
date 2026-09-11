@@ -172,10 +172,7 @@ jobs:
           echo ""
 
           python3 -m mutmut run "${{ matrix.module_path }}" \
-            --tests-dir frigate/test \
-            --test-time-base 0.1 \
-            --cache-dir .mutmut-cache \
-            --no-progress 2>&1 | tee mutation-results/raw.log
+            --tests-dir frigate/test 2>&1 | tee mutation-results/raw.log
 
           MUTMUT_EXIT=$?
           echo ""
