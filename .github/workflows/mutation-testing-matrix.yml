@@ -164,15 +164,14 @@ jobs:
           echo ""
 
           # Run mutmut with verbose output
-          echo "DEBUG: Running mutmut on paths: ${{ matrix.module_path }}"
+          echo "DEBUG: Running mutmut on module: ${{ matrix.module_path }}"
           echo "DEBUG: Tests directory: frigate/test"
           echo "DEBUG: Cache directory: .mutmut-cache"
           echo "DEBUG: Working directory: $(pwd)"
           echo "DEBUG: Python version: $(python3 --version)"
           echo ""
 
-          python3 -m mutmut run \
-            --paths "${{ matrix.module_path }}" \
+          python3 -m mutmut run "${{ matrix.module_path }}" \
             --tests-dir frigate/test \
             --test-time-base 0.1 \
             --cache-dir .mutmut-cache \
