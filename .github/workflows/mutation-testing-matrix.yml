@@ -109,7 +109,7 @@ jobs:
             frigate/test/test_builtin.py \
             -q
 
-          coverage json -o coverage.json
+          coverage report
 
           echo "✅ Coverage data generated"
 
@@ -160,7 +160,7 @@ jobs:
           path: |
             mutation-results/
             .mutmut.ini
-            coverage.json
+            htmlcov/
           retention-days: 90
 
       # Step 9: Summary
