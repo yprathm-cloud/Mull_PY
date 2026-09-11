@@ -79,10 +79,19 @@ jobs:
 
           # Install project dependencies required for mutation testing
           # These are needed to import the modules we're testing
-          pip install -q pathvalidate ruamel.yaml numpy scipy opencv-contrib-python 2>/dev/null || true
+          # Install each critical dependency individually to catch errors
+          echo "Installing project dependencies..."
+          pip install pathvalidate || (echo "FAILED to install pathvalidate"; exit 1)
+          pip install ruamel.yaml || (echo "FAILED to install ruamel.yaml"; exit 1)
+          pip install numpy || (echo "FAILED to install numpy"; exit 1)
+          pip install scipy || (echo "FAILED to install scipy"; exit 1)
 
+          # OpenCV is optional - installation may fail but we continue
+          pip install opencv-contrib-python 2>/dev/null || echo "Note: opencv-contrib-python not available (optional)"
+
+          echo ""
           echo "DEBUG: Installed packages:"
-          pip list | grep -E "mutmut|pytest|pathvalidate|numpy|yaml|opencv"
+          pip list | grep -E "mutmut|pytest|pathvalidate|numpy|ruamel|scipy" || echo "WARNING: Some packages not found in pip list"
 
       - name: Validate module imports
         id: validate
