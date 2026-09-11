@@ -202,6 +202,13 @@ jobs:
           set +e
 
           echo "=== Aggregating Mutation Testing Results ==="
+          echo ""
+          echo "DEBUG: Directory structure of all-results/"
+          find all-results -type f -name "*.json" 2>/dev/null | head -20
+          echo ""
+          echo "DEBUG: List of artifact directories"
+          ls -la all-results/ 2>/dev/null || echo "No all-results directory found"
+          echo ""
 
           # Create master summary
           {
@@ -212,40 +219,49 @@ jobs:
             echo "| Module | Test File | Total | Killed | Survived | Score | Status |"
             echo "|--------|-----------|-------|--------|----------|-------|--------|"
 
-            # Process each module's results
-            for artifact_dir in all-results/*/; do
-              if [ -d "$artifact_dir" ] && [ -f "$artifact_dir/metrics.json" ]; then
-                # Use jq if available, otherwise grep
-                if command -v jq &> /dev/null; then
-                  module=$(jq -r '.module_name' "$artifact_dir/metrics.json" 2>/dev/null || echo "Unknown")
-                  test_file=$(jq -r '.module_path' "$artifact_dir/metrics.json" 2>/dev/null || echo "Unknown")
-                  total=$(jq -r '.total_mutations' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
-                  killed=$(jq -r '.killed' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
-                  survived=$(jq -r '.survived' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
-                  score=$(jq -r '.score' "$artifact_dir/metrics.json" 2>/dev/null || echo "0")
-                else
-                  # Fallback to grep with safer patterns
-                  module=$(sed -n 's/.*"module_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$artifact_dir/metrics.json" | head -1)
-                  test_file=$(sed -n 's/.*"module_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$artifact_dir/metrics.json" | head -1)
-                  total=$(sed -n 's/.*"total_mutations"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
-                  killed=$(sed -n 's/.*"killed"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
-                  survived=$(sed -n 's/.*"survived"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
-                  score=$(sed -n 's/.*"score"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$artifact_dir/metrics.json" | head -1)
-                fi
+            # Process each module's results - check both possible locations
+            for artifact_dir in all-results/*/ all-results/mutation-results-*/; do
+              if [ -d "$artifact_dir" ]; then
+                echo "Checking directory: $artifact_dir"
+                # Look for metrics.json in the directory or subdirectories
+                metrics_file=$(find "$artifact_dir" -name "metrics.json" -type f | head -1)
 
-                # Determine status
-                if [ "$score" -ge 80 ]; then
-                  status="✅ Excellent"
-                elif [ "$score" -ge 70 ]; then
-                  status="🟢 Good"
-                elif [ "$score" -ge 60 ]; then
-                  status="🟡 Fair"
-                else
-                  status="❌ Poor"
-                fi
+                if [ -f "$metrics_file" ]; then
+                  echo "Found metrics file: $metrics_file"
+                  # Use jq if available, otherwise use grep
+                  if command -v jq &> /dev/null; then
+                    module=$(jq -r '.module_name // "Unknown"' "$metrics_file" 2>/dev/null)
+                    test_file=$(jq -r '.module_path // "Unknown"' "$metrics_file" 2>/dev/null)
+                    total=$(jq -r '.total_mutations // 0' "$metrics_file" 2>/dev/null)
+                    killed=$(jq -r '.killed // 0' "$metrics_file" 2>/dev/null)
+                    survived=$(jq -r '.survived // 0' "$metrics_file" 2>/dev/null)
+                    score=$(jq -r '.score // 0' "$metrics_file" 2>/dev/null)
+                  else
+                    # Fallback to grep with safer patterns
+                    module=$(grep -oP '"module_name"\s*:\s*"\K[^"]+' "$metrics_file" 2>/dev/null | head -1 || echo "Unknown")
+                    test_file=$(grep -oP '"module_path"\s*:\s*"\K[^"]+' "$metrics_file" 2>/dev/null | head -1 || echo "Unknown")
+                    total=$(grep -oP '"total_mutations"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
+                    killed=$(grep -oP '"killed"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
+                    survived=$(grep -oP '"survived"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
+                    score=$(grep -oP '"score"\s*:\s*\K[0-9]+' "$metrics_file" 2>/dev/null | head -1 || echo "0")
+                  fi
 
-                # Output table row
-                echo "| $module | \`$test_file\` | $total | $killed ✅ | $survived ❌ | $score% | $status |"
+                  # Determine status
+                  if [ "$score" -ge 80 ]; then
+                    status="✅ Excellent"
+                  elif [ "$score" -ge 70 ]; then
+                    status="🟢 Good"
+                  elif [ "$score" -ge 60 ]; then
+                    status="🟡 Fair"
+                  else
+                    status="❌ Poor"
+                  fi
+
+                  # Output table row
+                  echo "| $module | \`$test_file\` | $total | $killed ✅ | $survived ❌ | $score% | $status |"
+                else
+                  echo "WARNING: No metrics.json found in $artifact_dir"
+                fi
               fi
             done
 
