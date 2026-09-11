@@ -15,12 +15,14 @@ on:
       - 'frigate/test/**'
       - '.mutmut.ini'
       - '.github/workflows/mutation-testing-matrix.yml'
+      - '.github/workflows/*.yml'  # Trigger on any workflow changes
   pull_request:
     branches:
       - main
     paths:
       - 'frigate/util/**'
       - 'frigate/test/**'
+      - '.github/workflows/mutation-testing-matrix.yml'
 
 concurrency:
   group: ${{ github.ref }}-mutation-matrix
